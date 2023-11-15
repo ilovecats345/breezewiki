@@ -68,48 +68,54 @@
 (define (page-search req)
   ;; this just means, catch any errors and display them in the browser. it's a function somewhere else
   (response-handler
-   ;; the URL will look like "/minecraft/wiki/Special:Search?q=Spawner"
-   ;; grab the first part to use as the wikiname, in this case, "minecraft"
-   (define wikiname (path/param-path (first (url-path (request-uri req)))))
-   ;; grab the part after ?q= which is the search terms
-   (define query (dict-ref (url-query (request-uri req)) 'q #f))
-   ;; constructing the URL where I want to get fandom data from...
-   (define origin (format "https://~a.fandom.com" wikiname))
-   ;; the dest-URL will look something like https://minecraft.fandom.com/api.php?action=query&list=search&srsearch=Spawner&formatversion=2&format=json
-   (define dest-url
-     (format "~a/api.php?~a"
-             origin
-             (params->query `(("action" . "query")
-                              ("list" . "search")
-                              ("srsearch" . ,query)
-                              ("formatversion" . "2")
-                              ("format" . "json")))))
+   (cond
+     [(config-true? 'feature_offline::only)
+      (response/output #:code 503
+                       #:headers (build-headers always-headers)
+                       (λ (out) (write-html '(body (p "Sorry, full search is temporarily broken, but I have a plan to fix it.") (p "In the meantime, please use the popup search suggestions below the search box.")) out)))]
+     [else
+      ;; the URL will look like "/minecraft/wiki/Special:Search?q=Spawner"
+      ;; grab the first part to use as the wikiname, in this case, "minecraft"
+      (define wikiname (path/param-path (first (url-path (request-uri req)))))
+      ;; grab the part after ?q= which is the search terms
+      (define query (dict-ref (url-query (request-uri req)) 'q #f))
+      ;; constructing the URL where I want to get fandom data from...
+      (define origin (format "https://~a.fandom.com" wikiname))
+      ;; the dest-URL will look something like https://minecraft.fandom.com/api.php?action=query&list=search&srsearch=Spawner&formatversion=2&format=json
+      (define dest-url
+        (format "~a/api.php?~a"
+                origin
+                (params->query `(("action" . "query")
+                                 ("list" . "search")
+                                 ("srsearch" . ,query)
+                                 ("formatversion" . "2")
+                                 ("format" . "json")))))
 
-   ;; simultaneously get the search results from the fandom API, as well as information about the wiki as a whole (its license, icon, name)
-   (define-values (dest-res siteinfo)
-     (thread-values
-      (λ ()
-        (log-outgoing dest-url)
-        (easy:get dest-url #:timeouts timeouts)) ;; HTTP request to dest-url for search results
-      (λ ()
-        (siteinfo-fetch wikiname)))) ;; helper function in another file to get information about the wiki
+      ;; simultaneously get the search results from the fandom API, as well as information about the wiki as a whole (its license, icon, name)
+      (define-values (dest-res siteinfo)
+        (thread-values
+         (λ ()
+           (log-outgoing dest-url)
+           (easy:get dest-url #:timeouts timeouts)) ;; HTTP request to dest-url for search results
+         (λ ()
+           (siteinfo-fetch wikiname)))) ;; helper function in another file to get information about the wiki
 
-   ;; search results are a JSON string. parse JSON into racket data structures
-   (define data (easy:response-json dest-res))
-   ;; calling my generate-results-page function with the information so far in order to get a big fat x-expression
-   ;; big fat x-expression goes into the body variable
-   (define body (generate-results-page req dest-url wikiname query data #:siteinfo siteinfo))
-   ;; error checking
-   (when (config-true? 'debug)
-     ; used for its side effects
-     ; convert to string with error checking, error will be raised if xexp is invalid
-     (xexp->html body))
-   ;; convert body to HTML and send to browser
-   (response/output
-    #:code 200
-    #:headers (build-headers always-headers)
-    (λ (out)
-      (write-html body out)))))
+      ;; search results are a JSON string. parse JSON into racket data structures
+      (define data (easy:response-json dest-res))
+      ;; calling my generate-results-page function with the information so far in order to get a big fat x-expression
+      ;; big fat x-expression goes into the body variable
+      (define body (generate-results-page req dest-url wikiname query data #:siteinfo siteinfo))
+      ;; error checking
+      (when (config-true? 'debug)
+        ; used for its side effects
+        ; convert to string with error checking, error will be raised if xexp is invalid
+        (xexp->html body))
+      ;; convert body to HTML and send to browser
+      (response/output
+       #:code 200
+       #:headers (build-headers always-headers)
+       (λ (out)
+         (write-html body out)))])))
 (module+ test
   (parameterize ([(config-parameter 'feature_offline::only) "false"])
     (check-not-false ((query-selector (attribute-selector 'href "/test/wiki/Gacha_Capsule")

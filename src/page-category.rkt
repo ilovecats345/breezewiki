@@ -65,64 +65,70 @@
 
 (define (page-category req)
   (response-handler
-   (define wikiname (path/param-path (first (url-path (request-uri req)))))
-   (define prefixed-category (string-join (map path/param-path (cddr (url-path (request-uri req)))) "/"))
-   (define origin (format "https://~a.fandom.com" wikiname))
-   (define source-url (format "~a/wiki/~a" origin prefixed-category))
+   (cond
+     [(config-true? 'feature_offline::only)
+      (response/output #:code 503
+                       #:headers (build-headers always-headers)
+                       (λ (out) (write-html '(p "Sorry, category pages are temporarily disabled. I hope to have them back soon.") out)))]
+     [else
+      (define wikiname (path/param-path (first (url-path (request-uri req)))))
+      (define prefixed-category (string-join (map path/param-path (cddr (url-path (request-uri req)))) "/"))
+      (define origin (format "https://~a.fandom.com" wikiname))
+      (define source-url (format "~a/wiki/~a" origin prefixed-category))
 
-   (define-values (members-data page-data siteinfo)
-     (thread-values
-      (λ ()
-        (define dest-url
-          (format "~a/api.php?~a"
-                  origin
-                  (params->query `(("action" . "query")
-                                   ("list" . "categorymembers")
-                                   ("cmtitle" . ,prefixed-category)
-                                   ("cmlimit" . "max")
-                                   ("formatversion" . "2")
-                                   ("format" . "json")))))
-        (log-outgoing dest-url)
-        (define dest-res (easy:get dest-url #:timeouts timeouts))
-        (easy:response-json dest-res))
-      (λ ()
-        (define dest-url
-          (format "~a/api.php?~a"
-                  origin
-                  (params->query `(("action" . "parse")
-                                   ("page" . ,prefixed-category)
-                                   ("prop" . "text|headhtml|langlinks")
-                                   ("formatversion" . "2")
-                                   ("format" . "json")))))
-        (log-outgoing dest-url)
-        (define dest-res (easy:get dest-url #:timeouts timeouts))
-        (easy:response-json dest-res))
-      (λ ()
-        (siteinfo-fetch wikiname))))
+      (define-values (members-data page-data siteinfo)
+        (thread-values
+         (λ ()
+           (define dest-url
+             (format "~a/api.php?~a"
+                     origin
+                     (params->query `(("action" . "query")
+                                      ("list" . "categorymembers")
+                                      ("cmtitle" . ,prefixed-category)
+                                      ("cmlimit" . "max")
+                                      ("formatversion" . "2")
+                                      ("format" . "json")))))
+           (log-outgoing dest-url)
+           (define dest-res (easy:get dest-url #:timeouts timeouts))
+           (easy:response-json dest-res))
+         (λ ()
+           (define dest-url
+             (format "~a/api.php?~a"
+                     origin
+                     (params->query `(("action" . "parse")
+                                      ("page" . ,prefixed-category)
+                                      ("prop" . "text|headhtml|langlinks")
+                                      ("formatversion" . "2")
+                                      ("format" . "json")))))
+           (log-outgoing dest-url)
+           (define dest-res (easy:get dest-url #:timeouts timeouts))
+           (easy:response-json dest-res))
+         (λ ()
+           (siteinfo-fetch wikiname))))
 
-   (define title (preprocess-html-wiki (jp "/parse/title" page-data prefixed-category)))
-   (define page-html (preprocess-html-wiki (jp "/parse/text" page-data "")))
-   (define page (html->xexp page-html))
-   (define head-data ((head-data-getter wikiname) page-data))
-   (define body (generate-results-page
-                 #:req req
-                 #:source-url source-url
-                 #:wikiname wikiname
-                 #:title title
-                 #:members-data members-data
-                 #:page page
-                 #:head-data head-data
-                 #:siteinfo siteinfo))
+      (define title (preprocess-html-wiki (jp "/parse/title" page-data prefixed-category)))
+      (define page-html (preprocess-html-wiki (jp "/parse/text" page-data "")))
+      (define page (html->xexp page-html))
+      (define head-data ((head-data-getter wikiname) page-data))
+      (define body (generate-results-page
+                    #:req req
+                    #:source-url source-url
+                    #:wikiname wikiname
+                    #:title title
+                    #:members-data members-data
+                    #:page page
+                    #:head-data head-data
+                    #:siteinfo siteinfo))
 
-   (when (config-true? 'debug)
-     ; used for its side effects
-     ; convert to string with error checking, error will be raised if xexp is invalid
-     (xexp->html body))
-   (response/output
-    #:code 200
-    #:headers (build-headers always-headers)
-    (λ (out)
-      (write-html body out)))))
+      (when (config-true? 'debug)
+        ; used for its side effects
+        ; convert to string with error checking, error will be raised if xexp is invalid
+        (xexp->html body))
+      (response/output
+       #:code 200
+       #:headers (build-headers always-headers)
+       (λ (out)
+         (write-html body out)))])))
 (module+ test
   (check-not-false ((query-selector (attribute-selector 'href "/test/wiki/Ankle_Monitor")
                                     (generate-results-page
