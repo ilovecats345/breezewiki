@@ -2,7 +2,7 @@ FROM rust:latest
 
 WORKDIR /app
 
-COPY. /app/
+COPY..
 
 RUN cargo build --release
 
