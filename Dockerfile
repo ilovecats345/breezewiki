@@ -1,11 +1,20 @@
-FROM rust:latest
+# Use the official Node.js image as a base
+FROM node:14
 
-WORKDIR /app
+# Set the working directory
+WORKDIR /usr/src/app
 
-COPY..
+# Copy package.json and package-lock.json
+COPY package*.json ./
 
-RUN cargo build --release
+# Install dependencies
+RUN npm install
 
-EXPOSE 8080
+# Copy the rest of the application code
+COPY . .
 
-CMD ["cargo", "run", "--release"]
+# Expose the port the app runs on
+EXPOSE 3000
+
+# Command to run the application
+CMD ["npm", "start"]
